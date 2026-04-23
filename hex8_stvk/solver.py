@@ -7,6 +7,41 @@ from .assembly import assemble
 from .io import write_vtu, write_pvd
 
 
+def apply_bc(mesh, clamped_nodes, loaded_nodes, load_dir, load_total):
+    """Set up Dirichlet and Neumann boundary conditions.
+
+    All three DOFs of `clamped_nodes` are fixed; `load_total` is spread evenly
+    over `loaded_nodes` in direction `load_dir` (0=x, 1=y, 2=z).
+
+    Returns (fixed_dofs, f_ext).
+    """
+    fixed = (3 * clamped_nodes[:, None] + np.arange(3)).ravel()
+    f_ext = np.zeros(mesh.ndof)
+    f_ext[3 * loaded_nodes + load_dir] = load_total / len(loaded_nodes)
+    return fixed, f_ext
+
+
+class Norms:
+    """Relative-norm convergence check against the very first residual/increment.
+
+    The first call fixes reference scales |R_1,1| and |du_1,1|; subsequent
+    calls return the relative ratios and whether both are below tolerance.
+    """
+    def __init__(self, tol_r, tol_u):
+        self.tol_r, self.tol_u = tol_r, tol_u
+        self.res_11 = None
+        self.du_11 = None
+
+    def __call__(self, res, du):
+        if self.res_11 is None:
+            self.res_11 = res if res > 0 else 1.0
+        if self.du_11 is None:
+            self.du_11 = du if du > 0 else 1.0
+        r_rel = res / self.res_11
+        u_rel = du / self.du_11
+        return r_rel, u_rel, (r_rel < self.tol_r and u_rel < self.tol_u)
+
+
 def nonlinear_solve(mesh, mat, fext, fixed,
                     steps=20, tol_r=1e-8, tol_u=1e-8,
                     maxit=40, outdir="paraview_output"):
@@ -23,46 +58,27 @@ def nonlinear_solve(mesh, mat, fext, fixed,
     """
     u = np.zeros(mesh.ndof)
     free = np.setdiff1d(np.arange(mesh.ndof), fixed)
+    norms = Norms(tol_r, tol_u)
 
     os.makedirs(outdir, exist_ok=True)
     vtu_files = []
 
-    kw = max(len(str(steps)), 1)      # padding widths for aligned columns
+    kw = max(len(str(steps)), 1)
     iw = max(len(str(maxit)), 1)
-
-    # Column header. Value fields are sized so the first digit sits under the
-    # first '_' of the column label (e.g. "  1.0e+00  " inside "du_ki/du_11").
     header = f"  {'k':>{kw}}  {'i':>{iw}}   R_ki/R_11   du_ki/du_11"
     print(header)
     print("=" * len(header))
 
-    res_11 = None                 # |R_1,1|  very-first residual
-    du_11 = None                  # |du_1,1| very-first Newton increment
-
-    for k in range(steps):        # k: load step
+    for k in range(steps):
         f_target = fext * (k + 1) / steps       # proportional load stepping
         converged = False
 
-        for i in range(maxit):    # i: Newton iteration
+        for i in range(maxit):
             R, K, cell_sigma = assemble(u, mesh, mat, f_target)
-            res = np.linalg.norm(R[free])
-
-            # Solve K_ff * du_free = -R_free on the free sub-block
             du_free = spla.spsolve(K[free][:, free], -R[free])
-            du_norm = np.linalg.norm(du_free)
 
-            # Fix reference scales on the very first Newton iteration. If
-            # the reference is exactly zero (already at equilibrium), fall
-            # back to 1.0 so the ratio is 0 rather than a divide-by-zero.
-            if res_11 is None:
-                res_11 = res if res > 0 else 1.0
-            if du_11 is None:
-                du_11 = du_norm if du_norm > 0 else 1.0
-
-            r_rel = res / res_11
-            u_rel = du_norm / du_11
-
-            ok = (r_rel < tol_r) and (u_rel < tol_u)
+            r_rel, u_rel, ok = norms(np.linalg.norm(R[free]),
+                                     np.linalg.norm(du_free))
             tag = "  converged" if ok else ""
             print(f"  {k+1:>{kw}d}  {i+1:>{iw}d}  "
                   f"  {r_rel:.1e}      {u_rel:.1e}{tag}")
@@ -70,7 +86,6 @@ def nonlinear_solve(mesh, mat, fext, fixed,
             if ok:
                 converged = True
                 break
-
             u[free] += du_free
 
         if not converged:

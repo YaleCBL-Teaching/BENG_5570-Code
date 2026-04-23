@@ -85,8 +85,8 @@ def hex8_element(u_elem, dNdX_e, detJ0_e, mat):
         # Green-Lagrange strain:      E_IJ = 1/2 (F_kI F_kJ - delta_IJ)
         Egl = 0.5 * (F.T @ F - I3)
 
-        # 2nd Piola-Kirchhoff stress: S_IJ = lam tr(E) delta_IJ + 2 mu E_IJ
-        S = mat.lam * np.trace(Egl) * I3 + 2.0 * mat.mu * Egl
+        # Constitutive law: 2nd Piola-Kirchhoff stress S and tangent C = dS/dE
+        S, Cmat = mat.stress_tangent(Egl)
 
         # Cauchy stress:              sigma_ij = (1/J) F_iI S_IJ F_jJ
         sigma = (F @ S @ F.T) / J
@@ -96,7 +96,7 @@ def hex8_element(u_elem, dNdX_e, detJ0_e, mat):
 
         # Spatial elasticity (push-forward of C):
         #                             c_ijkl = (1/J) F_iI F_jJ F_kK F_lL C_IJKL
-        c = np.einsum('iI,jJ,kK,lL,IJKL->ijkl', F, F, F, F, mat.Cmat) / J
+        c = np.einsum('iI,jJ,kK,lL,IJKL->ijkl', F, F, F, F, Cmat) / J
 
         # Internal nodal force:       f_ai = sigma_ij * dNdx_aj
         fint += np.einsum('ij,aj->ai', sigma, dNdx) * dv

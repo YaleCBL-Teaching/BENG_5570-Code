@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 from .material import Material
 from .mesh import create_mesh
-from .solver import nonlinear_solve
+from .solver import apply_bc, nonlinear_solve
 from .plot import plot_mesh
 
 
@@ -81,16 +81,11 @@ def main():
                        nx=args.nx, ny=args.ny, nz=args.nz)
     mat = Material(E=args.E, nu=args.nu)
 
-    # Nodes on the two end faces
+    # Clamp the x = 0 face; distribute the tip load in -y over the x = L face.
     base = np.where(np.isclose(mesh.nodes[:, 0], 0.0))[0]
     tip  = np.where(np.isclose(mesh.nodes[:, 0], args.length))[0]
-
-    # Tip load: distributed equally over the x = L face nodes, in y direction
-    Fext = np.zeros(mesh.ndof)
-    Fext[3 * tip + 1] = args.load / len(tip)
-
-    # Clamp the x = 0 face (all 3 DOFs of every node fixed)
-    fixed = (3 * base[:, None] + np.arange(3)).ravel()
+    fixed, Fext = apply_bc(mesh, clamped_nodes=base,
+                           loaded_nodes=tip, load_dir=1, load_total=args.load)
 
     print_header(args, mesh)
     t0 = time.perf_counter()
