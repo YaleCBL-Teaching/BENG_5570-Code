@@ -227,12 +227,18 @@ def assemble(u, mesh, mat, f_ext):
 
 # Newton-Raphson nonlinear solver
 def nonlinear_solve(mesh, mat, fext, fixed,
-                    steps=20, tol=1e-3, maxit=40, outdir="paraview_output"):
+                    steps=20, tol_r=1e-8, tol_u=1e-8,
+                    maxit=40, outdir="paraview_output"):
     """
-    Load-stepped Newton-Raphson solve for u(F_ext). The external load is applied
-    in `steps` equal increments; each increment is driven to |R_free| < tol via
-    Newton, solving only on the free (non-Dirichlet) DOFs. A VTU file is written
-    per converged step and collected in a PVD.
+    Load-stepped Newton-Raphson solve for u(F_ext). Load is applied in `steps`
+    equal increments; each increment iterates until both relative measures are
+    below their tolerances:
+
+        |R_k,i| / |R_1,1|     residual vs. the very first residual
+        |du_k,i| / |du_1,1|   increment vs. the very first increment
+
+    Only free (non-Dirichlet) DOFs enter the norms. A VTU file is written per
+    converged step and collected in a PVD.
     """
     u = np.zeros(mesh.ndof)
     free = np.setdiff1d(np.arange(mesh.ndof), fixed)
@@ -240,32 +246,54 @@ def nonlinear_solve(mesh, mat, fext, fixed,
     os.makedirs(outdir, exist_ok=True)
     vtu_files = []
 
-    kw = len(str(steps))          # padding widths for aligned output
-    iw = len(str(maxit))
+    kw = max(len(str(steps)), 1)      # padding widths for aligned columns
+    iw = max(len(str(maxit)), 1)
+
+    # Column header. Value fields are sized so the first digit sits under the
+    # first '_' of the column label: "  1.0e+00  " inside "du_ki/du_11".
+    header = (f"  {'k':>{kw}}  {'i':>{iw}}   R_ki/R_11   du_ki/du_11")
+    print(header)
+    print("=" * len(header))
+
+    res_11 = None                 # |R_1,1|  very-first residual
+    du_11 = None                  # |du_1,1| very-first Newton increment
 
     for k in range(steps):        # k: load step
         f_target = fext * (k + 1) / steps       # proportional load stepping
-        print(f"k = {k+1:>{kw}d}/{steps}")
         converged = False
 
         for i in range(maxit):    # i: Newton iteration
             R, K, cell_sigma = assemble(u, mesh, mat, f_target)
             res = np.linalg.norm(R[free])
 
-            tag = "  converged" if res < tol else ""
-            print(f"  i = {i+1:>{iw}d}   |R| = {res:.3e}{tag}")
+            # Solve K_ff * du_free = -R_free  on the free sub-block
+            du_free = spla.spsolve(K[free][:, free], -R[free])
+            du_norm = np.linalg.norm(du_free)
 
-            if res < tol:
+            # Fix reference scales on the very first Newton iteration
+            if res_11 is None:
+                res_11 = res if res > 0 else 1.0
+            if du_11 is None:
+                du_11 = du_norm if du_norm > 0 else 1.0
+
+            r_rel = res / res_11
+            u_rel = du_norm / du_11
+
+            ok = (r_rel < tol_r) and (u_rel < tol_u)
+            tag = "  converged" if ok else ""
+            # Leading spaces put first digit of value under first '_' of label.
+            print(f"  {k+1:>{kw}d}  {i+1:>{iw}d}  "
+                  f"  {r_rel:.1e}      {u_rel:.1e}{tag}")
+
+            if ok:
                 converged = True
                 break
 
-            # Solve K_ff * du_free = -R_free  on the free sub-block
-            du = np.zeros(mesh.ndof)
-            du[free] = spla.spsolve(K[free][:, free], -R[free])
-            u += du
+            u[free] += du_free
 
         if not converged:
             raise RuntimeError(f"Newton failed at step {k+1}")
+        print("-" * len(header))
 
         vtu_name = f"step_{k:04d}.vtu"
         write_vtu(os.path.join(outdir, vtu_name), mesh, u.reshape(-1, 3), cell_sigma)
@@ -369,7 +397,10 @@ def parse_args():
                         "for negative scientific notation use --load=-5e6")
     # Solver
     p.add_argument("--steps",  type=int,   default=2)
-    p.add_argument("--tol",    type=float, default=1e-3)
+    p.add_argument("--tol-r",  type=float, default=1e-8,
+                   help="Tolerance on |R_k,i| / |R_1,1|")
+    p.add_argument("--tol-u",  type=float, default=1e-8,
+                   help="Tolerance on |du_k,i| / |du_1,1|")
     p.add_argument("--maxit",  type=int,   default=40)
     p.add_argument("--outdir", default="paraview_output")
     # Plot
@@ -389,8 +420,9 @@ def print_header(args, mesh):
           f"({len(mesh.nodes)} nodes, {mesh.ndof} DOFs, {len(mesh.elements)} cells)")
     print(f"  Material    E = {args.E:.3e}   nu = {args.nu:g}")
     print(f"  Load        F = {args.load:+.3e} N   (tip face, y direction)")
-    print(f"  Solver      steps = {args.steps}   tol = {args.tol:.1e}   "
-          f"maxit = {args.maxit}")
+    print(f"  Solver      steps = {args.steps}   maxit = {args.maxit}")
+    print(f"              tol(R/R_11) = {args.tol_r:.1e}   "
+          f"tol(du/du_11) = {args.tol_u:.1e}")
     print(f"  Output      {args.outdir!r}")
     print(bar)
 
@@ -429,8 +461,9 @@ if __name__ == "__main__":
     print_header(args, mesh)
     t0 = time.perf_counter()
     u = nonlinear_solve(mesh, mat, Fext, fixed,
-                        steps=args.steps, tol=args.tol, maxit=args.maxit,
-                        outdir=args.outdir)
+                        steps=args.steps,
+                        tol_r=args.tol_r, tol_u=args.tol_u,
+                        maxit=args.maxit, outdir=args.outdir)
     print_footer(args, mesh, u, tip, time.perf_counter() - t0)
 
     if not args.no_plot:
