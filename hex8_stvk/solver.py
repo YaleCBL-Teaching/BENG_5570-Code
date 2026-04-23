@@ -4,29 +4,20 @@ import numpy as np
 import scipy.sparse.linalg as spla
 
 from .assembly import assemble
+from .element import N_DIM
 from .io import write_vtu, write_pvd
 
 
 def apply_bc(mesh, clamped_nodes, loaded_nodes, load_dir, load_total):
-    """Set up Dirichlet and Neumann boundary conditions.
-
-    All three DOFs of `clamped_nodes` are fixed; `load_total` is spread evenly
-    over `loaded_nodes` in direction `load_dir` (0=x, 1=y, 2=z).
-
-    Returns (fixed_dofs, f_ext).
-    """
-    fixed = (3 * clamped_nodes[:, None] + np.arange(3)).ravel()
+    """clamp all DOFs of clamped_nodes and distribute load_total over loaded_nodes along load_dir; returns (fixed_dofs, f_ext)."""
+    fixed = (N_DIM * clamped_nodes[:, None] + np.arange(N_DIM)).ravel()
     f_ext = np.zeros(mesh.ndof)
-    f_ext[3 * loaded_nodes + load_dir] = load_total / len(loaded_nodes)
+    f_ext[N_DIM * loaded_nodes + load_dir] = load_total / len(loaded_nodes)
     return fixed, f_ext
 
 
 class Norms:
-    """Relative-norm convergence check against the very first residual/increment.
-
-    The first call fixes reference scales |R_1,1| and |du_1,1|; subsequent
-    calls return the relative ratios and whether both are below tolerance.
-    """
+    """relative-norm convergence check; the first call fixes the references |R_1,1| and |du_1,1|."""
     def __init__(self, tol_r, tol_u):
         self.tol_r, self.tol_u = tol_r, tol_u
         self.res_11 = None
@@ -45,17 +36,7 @@ class Norms:
 def nonlinear_solve(mesh, mat, fext, fixed,
                     steps=20, tol_r=1e-8, tol_u=1e-8,
                     maxit=40, outdir="paraview_output"):
-    """
-    Load-stepped Newton-Raphson solve for u(F_ext). Load is applied in `steps`
-    equal increments; each increment iterates until both relative measures are
-    below their tolerances:
-
-        |R_k,i| / |R_1,1|     residual vs. the very first residual
-        |du_k,i| / |du_1,1|   increment vs. the very first increment
-
-    Only free (non-Dirichlet) DOFs enter the norms. A VTU file is written per
-    converged step and collected in a PVD.
-    """
+    """load-stepped Newton-Raphson solve for u(F_ext); writes a VTU per converged step and a PVD collection."""
     u = np.zeros(mesh.ndof)
     free = np.setdiff1d(np.arange(mesh.ndof), fixed)
     norms = Norms(tol_r, tol_u)
@@ -70,11 +51,11 @@ def nonlinear_solve(mesh, mat, fext, fixed,
     print("=" * len(header))
 
     for k in range(steps):
-        f_target = fext * (k + 1) / steps       # proportional load stepping
-        converged = False
+        # proportional load stepping
+        f_target = fext * (k + 1) / steps
 
         for i in range(maxit):
-            R, K, cell_sigma = assemble(u, mesh, mat, f_target)
+            R, K, elem_sigma = assemble(u, mesh, mat, f_target)
             du_free = spla.spsolve(K[free][:, free], -R[free])
 
             r_rel, u_rel, ok = norms(np.linalg.norm(R[free]),
@@ -84,16 +65,14 @@ def nonlinear_solve(mesh, mat, fext, fixed,
                   f"  {r_rel:.1e}      {u_rel:.1e}{tag}")
 
             if ok:
-                converged = True
                 break
             u[free] += du_free
-
-        if not converged:
+        else:
             raise RuntimeError(f"Newton failed at step {k+1}")
         print("-" * len(header))
 
         vtu_name = f"step_{k:04d}.vtu"
-        write_vtu(os.path.join(outdir, vtu_name), mesh, u.reshape(-1, 3), cell_sigma)
+        write_vtu(os.path.join(outdir, vtu_name), mesh, u.reshape(-1, N_DIM), elem_sigma)
         vtu_files.append(vtu_name)
 
     write_pvd(os.path.join(outdir, "solution.pvd"), vtu_files)

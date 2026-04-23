@@ -3,12 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
-from .element import HEX_EDGES
+from .element import HEX_EDGES, N_DIM
 
 
 def plot_mesh(mesh, u, scale=1.0):
-    """Wireframe plot of the deformed mesh. `scale` multiplies the displacement field."""
-    xyz = mesh.nodes + scale * u.reshape(-1, 3)
+    """wireframe plot of the deformed mesh; scale multiplies the displacement field."""
+    xyz = mesh.nodes + scale * u.reshape(-1, N_DIM)
     # For each element, pull the endpoints of all 12 edges: shape (n_elem*12, 2, 3)
     segments = xyz[mesh.elements[:, HEX_EDGES]].reshape(-1, 2, 3)
 
