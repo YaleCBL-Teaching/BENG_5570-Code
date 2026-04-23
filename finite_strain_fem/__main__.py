@@ -1,4 +1,4 @@
-"""Cantilever beam driver. Run with:  python -m hex8_stvk [options]"""
+"""Cantilever beam driver. Run with:  python -m finite_strain_fem [options]"""
 import argparse
 import time
 import numpy as np

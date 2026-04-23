@@ -5,7 +5,7 @@ import scipy.sparse.linalg as spla
 
 from .assembly import assemble
 from .element import N_DIM
-from .io import write_vtu, write_pvd
+from .paraview import write_vtu, write_pvd
 
 
 def apply_bc(mesh, clamped_nodes, loaded_nodes, load_dir, load_total):
@@ -16,7 +16,7 @@ def apply_bc(mesh, clamped_nodes, loaded_nodes, load_dir, load_total):
     return fixed, f_ext
 
 
-class Norms:
+class ConvergenceCheck:
     """relative-norm convergence check; the first call fixes the references |R_1,1| and |du_1,1|."""
     def __init__(self, tol_r, tol_u):
         self.tol_r, self.tol_u = tol_r, tol_u
@@ -39,7 +39,7 @@ def nonlinear_solve(mesh, mat, fext, fixed,
     """load-stepped Newton-Raphson solve for u(F_ext); writes a VTU per converged step and a PVD collection."""
     u = np.zeros(mesh.ndof)
     free = np.setdiff1d(np.arange(mesh.ndof), fixed)
-    norms = Norms(tol_r, tol_u)
+    check = ConvergenceCheck(tol_r, tol_u)
 
     os.makedirs(outdir, exist_ok=True)
     vtu_files = []
@@ -58,7 +58,7 @@ def nonlinear_solve(mesh, mat, fext, fixed,
             R, K, elem_sigma = assemble(u, mesh, mat, f_target)
             du_free = spla.spsolve(K[free][:, free], -R[free])
 
-            r_rel, u_rel, ok = norms(np.linalg.norm(R[free]),
+            r_rel, u_rel, ok = check(np.linalg.norm(R[free]),
                                      np.linalg.norm(du_free))
             tag = "  converged" if ok else ""
             print(f"  {k+1:>{kw}d}  {i+1:>{iw}d}  "
