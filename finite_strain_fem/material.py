@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 import numpy as np
 
-from .element import N_DIM
+from .physics import N_DIM
 
 
 @dataclass

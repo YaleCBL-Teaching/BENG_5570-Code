@@ -10,7 +10,7 @@ From the repository root, run:
 python -m finite_strain_fem
 ```
 
-The defaults solve a cantilever beam (L=10, 8×2×2 hex8, E=200 GPa, ν=0.45, tip load −1 GN). The most useful options are:
+The defaults solve a cantilever beam (L=10, 8×2×2 hex8, E=200e9, ν=0.45, tip load −1e9). The most useful options are:
 
 | option | meaning |
 |---|---|
@@ -33,16 +33,3 @@ Every converged load step also writes a `.vtu` file, collected into `paraview_ou
 Open the PVD in ParaView, apply the **Warp By Vector** filter with `Displacement` to move the nodes to their deformed positions, then color by any stress component:
 
 ![ParaView session](figures/paraview.png)
-
-## Package layout
-
-| module | role |
-|---|---|
-| `material.py` | St. Venant-Kirchhoff material; `stress_tangent(E)` → (S, C) |
-| `element.py` | hex8 kinematics, stress, K_mat + K_geo |
-| `assembly.py` | global residual and sparse tangent |
-| `solver.py` | load-stepped Newton-Raphson, BC helper, convergence check |
-| `mesh.py` | `Mesh` dataclass and structured brick generator |
-| `paraview.py` | VTU / PVD output |
-| `plot.py` | matplotlib wireframe |
-| `__main__.py` | cantilever-beam driver |

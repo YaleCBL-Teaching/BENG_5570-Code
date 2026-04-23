@@ -7,7 +7,8 @@ loop only does per-element kinematics / stress / tangent.
 from dataclasses import dataclass, field
 import numpy as np
 
-from .element import dN_dxi, GP, N_DIM, N_DOF_ELEM
+from .hex8 import dN_dxi, GP
+from .physics import N_DIM, N_DOF_ELEM
 
 
 # Shape-function natural-coord derivatives evaluated at every Gauss point,
@@ -45,6 +46,14 @@ class Mesh:
     @property
     def ndof(self):
         return N_DIM * len(self.nodes)
+
+
+def apply_bc(mesh, clamped_nodes, loaded_nodes, load_dir, load_total):
+    """clamp all DOFs of clamped_nodes and distribute load_total over loaded_nodes along load_dir; returns (fixed_dofs, f_ext)."""
+    fixed = (N_DIM * clamped_nodes[:, None] + np.arange(N_DIM)).ravel()
+    f_ext = np.zeros(mesh.ndof)
+    f_ext[N_DIM * loaded_nodes + load_dir] = load_total / len(loaded_nodes)
+    return fixed, f_ext
 
 
 def create_mesh(L, H, W, nx, ny, nz):

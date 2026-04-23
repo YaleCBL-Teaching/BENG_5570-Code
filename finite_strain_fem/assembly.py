@@ -2,7 +2,7 @@
 import numpy as np
 import scipy.sparse as sp
 
-from .element import hex8_element, N_DIM, N_DOF_ELEM
+from .physics import finite_strain_element, N_DIM, N_DOF_ELEM
 
 _NBLOCK = N_DOF_ELEM ** 2          # triplet entries per element
 
@@ -21,7 +21,7 @@ def assemble(u, mesh, mat, f_ext):
 
     for e in range(n_elem):
         dofs = mesh.dof_map[e]
-        Ke, fint, sig = hex8_element(u[dofs], mesh.dNdX[e], mesh.detJ0[e], mat)
+        Ke, fint, sig = finite_strain_element(u[dofs], mesh.dNdX[e], mesh.detJ0[e], mat)
         elem_sigma[e] = sig
         Rint[dofs] += fint
 

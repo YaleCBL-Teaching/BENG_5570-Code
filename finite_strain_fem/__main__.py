@@ -1,13 +1,15 @@
 """Cantilever beam driver. Run with:  python -m finite_strain_fem [options]"""
 import argparse
+import os
 import time
 import numpy as np
 import matplotlib.pyplot as plt
 
-from .element import N_DIM
+from .physics import N_DIM
 from .material import Material
-from .mesh import create_mesh
-from .solver import apply_bc, nonlinear_solve
+from .mesh import apply_bc, create_mesh
+from .paraview import write_vtu, write_pvd
+from .solver import nonlinear_solve
 from .plot import plot_mesh
 
 
@@ -87,10 +89,18 @@ def main():
 
     print_header(args, mesh)
     t0 = time.perf_counter()
-    u = nonlinear_solve(mesh, mat, Fext, fixed,
-                        steps=args.steps,
-                        tol_r=args.tol_r, tol_u=args.tol_u,
-                        maxit=args.maxit, outdir=args.outdir)
+    os.makedirs(args.outdir, exist_ok=True)
+    vtu_files = []
+    u = np.zeros(mesh.ndof)
+    for k, u, elem_sigma in nonlinear_solve(mesh, mat, Fext, fixed,
+                                            steps=args.steps,
+                                            tol_r=args.tol_r, tol_u=args.tol_u,
+                                            maxit=args.maxit):
+        vtu = f"step_{k:04d}.vtu"
+        write_vtu(os.path.join(args.outdir, vtu), mesh,
+                  u.reshape(-1, N_DIM), elem_sigma)
+        vtu_files.append(vtu)
+    write_pvd(os.path.join(args.outdir, "solution.pvd"), vtu_files)
     print_footer(args, u, tip, time.perf_counter() - t0)
 
     if not args.no_plot:

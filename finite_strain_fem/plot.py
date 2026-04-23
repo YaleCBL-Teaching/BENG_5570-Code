@@ -3,7 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
-from .element import HEX_EDGES, N_DIM
+from .hex8 import HEX_EDGES
+from .physics import N_DIM
 
 
 def plot_mesh(mesh, u, scale=1.0):
